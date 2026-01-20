@@ -104,3 +104,28 @@ JETSON MAX 모드 (FPS 상승을 위해 필요)
 흰색(TX) : 8번핀 (TX)
 청록색(RX) : 10번 핀 (RX)
 
+
+
+**파일 별 변경점**
+
+**송신 (Jetson Orin nano Developer kit)**
+- test.py : yolo11n.pt를 이용하여 객체 탐지
+- test1.py : 프레임별 로그 추가
+- test2.py : 실시간 FPS 추가
+- test3.py : Yolo11n 내장 트래커 추가
+- test4.py : 시리얼 통신으로 결과값 전송 추가
+- test5.py : 시리얼 통신으로 받는 결과값 형식 다듬기, 트래킹 수정
+- test6.py : 영상 파일에 객체 탐지 적용
+- test7.py : 프레임 캡처, 추론, 시각화를 각각 별도 스레드로 분리, 해상도 축소, 5프레임마다 화면 업데이트
+- test8.py : 내부 스트림 처리
+- test9.py : ROI 설정
+- test10.py : ROI를 설정해서 템플릿 기억 후 유지, 객체 탐지 시 BBOX 생성 후 터치 시 객체 추적
+- test11.py : 기본 모델 대신 TensorRT를 통해 engine 형태로 변환 후 적용하여 프레임 상승시킴, 리팩토링
+- test12.py : 시리얼 통신 보완 (rec2.py와 시리얼 통신)
+- test13.py : 칼만 필터를 적용하여 객체의 움직임을 예측하여 ROI 추적을 보완
+- test14.py : BBOX를 클릭할 경우 BBOX들은 모두 OFF되고, ROI만 표시됨
+- test15.py : USB 카메라로 실시간 화면에 적용 가능
+
+**수신 (PC)**
+- rec.py : 시리얼 통신을 통해 데이터를 받는 코드 (test4~test11)
+- rec2.py : 시리얼 통신 보완 (test12~test15)
