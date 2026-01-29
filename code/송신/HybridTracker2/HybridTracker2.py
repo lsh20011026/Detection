@@ -1,116 +1,86 @@
-import cv2
-import numpy as np
-import time
-from ultralytics import YOLO
-import serial
+import cv2          # 이미지 처리
+import numpy as np  # 수치 계산
+import time         # 시간 측정
+from ultralytics import YOLO     # YOLO 객체 탐지
+import serial       # 직렬 통신
 import sys
 import struct
 sys.path.append("/home/nes/.local/lib/python3.10/site-packages")
-from KalmanTracker import KalmanTracker
-from serial_manager import SerialManager
-from config import TrackerConfig 
-from dataclasses import dataclass 
+from KalmanTracker import KalmanTracker   # 칼만 필터 추적기
+from serial_manager import SerialManager  # 직렬 통신 매니저
+from config import TrackerConfig          # 추적 설정
+from camera_manager import CameraManager  # 카메라 관리
+from ui_manager import UIManager          # UI 관리 (마우스/키보드/그리기)
 
 class HybridTracker:
-    """YOLO + Template Matching 하이브리드 추적 시스템 (🚀 YOLO 재탐지 ON + BBOX 숨김 + 카메라 전환)"""
+    """
+    하이브리드 객체 추적기: YOLO + 템플릿 매칭 + 칼만 필터
+    - 실시간 비디오에서 객체 탐지 및 추적
+    - 직렬 통신으로 드론/하드웨어 전송
+    """
 
     def __init__(self):
-        # 🔥 설정 객체 (기존 10줄 하드코딩 → 1줄)
+        # 설정 및 매니저 초기화
         self.config = TrackerConfig()
         
-        # 🔥 SerialManager로 교체
-        self.serial_mgr = SerialManager()
-        self.last_tx_frame = 0
+        self.serial_mgr = SerialManager()      # 직렬 포트 관리
+        self.last_tx_frame = 0                 # 마지막 전송 프레임
+        self.kalman_tracker = KalmanTracker()  # 칼만 필터
+        self.camera_mgr = CameraManager(self.config)  # 카메라
+        self.ui_mgr = UIManager(self, self.camera_mgr) # UI
         
-        # 🔥 KalmanTracker 인스턴스 추가
-        self.kalman_tracker = KalmanTracker()
-        
-        # 🔥 카메라 전환 관련 변수 추가
-        self.current_cam_index = 0
-        self.available_cameras = []
-        self.cap = None
-        
-        # 추적 상태
-        self.current_roi = None
-        self.template = None
-        self.tracking_mode = "NONE"  # "NONE" / "TEMPLATE" / "KALMAN_ONLY"
-        self.yolo_enabled = False
-        self.roi_tracking_active = False  # 🔥 ROI 추적 시작 여부
-        self.show_yolo_boxes = True  # 🔥 YOLO BBOX 표시 여부 (클릭 후 OFF)
-
-        # 상태 변수
-        self.frame_h = 0
+        # 프레임 크기 (동적 업데이트)
         self.frame_w = 0
-        self.lost_frame_count = 0
-        self.frame_count = 0
-        self.last_conf = 0.0
-        self.kalman_only_count = 0
+        self.frame_h = 0
+        
+        # 추적 상태 변수
+        self.current_roi = None          # 현재 ROI (x1,y1,x2,y2)
+        self.template = None             # 템플릿 이미지
+        self.tracking_mode = "NONE"      # NONE/TEMPLATE/KALMAN_ONLY
+        self.yolo_enabled = False        # YOLO 활성화 여부
+        self.roi_tracking_active = False # ROI 추적 활성
+        self.show_yolo_boxes = True       # YOLO 박스 표시
+        self.lost_frame_count = 0        # 추적 실패 카운트
+        self.frame_count = 0             # 총 프레임 수
+        self.last_conf = 0.0             # 마지막 신뢰도
+        self.kalman_only_count = 0       # 칼만 전용 카운트
 
-        # 하드웨어
-        self.model = None
+        self.model = None                 # YOLO 모델
 
-        # 마우스 콜백용
-        self.mouse_param = {"frame": None, "boxes": None}
+    def init_hardware(self):
+        """카메라 및 YOLO 모델 초기화"""
+        self.camera_mgr.detect_available_cameras()
+        if not self.camera_mgr.cameras:
+            raise ValueError("❌ 사용 가능한 카메라가 없습니다")
+        
+        self.camera_mgr.init_camera(self.camera_mgr.cameras[0].index)
+        self.frame_w, self.frame_h = self.camera_mgr.frame_w, self.camera_mgr.frame_h
+        print(f"📹 초기 카메라: {self.camera_mgr.current_camera.index} ({self.frame_w}x{self.frame_h})")
+        
+        try:
+            self.model = YOLO(self.config.MODEL_PATH, task='detect')
+            print("🚀 TensorRT YOLO loaded")
+        except Exception as e:
+            print(f"❌ YOLO model load failed: {e}")
+            self.model = None
 
-    # ================= 🔥 카메라 전환 기능 ==================
-    def detect_available_cameras(self):
-        """사용 가능한 USB 카메라 자동 감지"""
-        self.available_cameras = []
-        for i in range(4):  # 0~3번 카메라 테스트
-            cap = cv2.VideoCapture(i)
-            if cap.isOpened():
-                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                if w > 100 and h > 100:  # 유효한 카메라
-                    self.available_cameras.append(i)
-                cap.release()
-        print(f"📹 사용 가능 카메라: {self.available_cameras}")
-
-    def switch_camera(self):
-        """다음 카메라로 전환"""
-        if len(self.available_cameras) <= 1:
-            print("❌ 전환할 카메라가 없습니다")
+    def send_serial_data(self, frame_id, roi, conf, mode, fps, status):
+        """추적 데이터 직렬 전송 (SerialManager 위임)"""
+        if not self.serial_mgr.is_connected():
             return
-            
-        # 현재 카메라 해제
-        if self.cap:
-            self.cap.release()
-            self.cap = None
-            
-        # 다음 카메라 인덱스 계산
-        self.current_cam_index = (self.current_cam_index + 1) % len(self.available_cameras)
-        new_cam_id = self.available_cameras[self.current_cam_index]
-        
-        # 새 카메라 초기화
-        self.init_single_camera(new_cam_id)
-        self.reset_tracking()  # 추적 리셋 (새 카메라에서는 새로 시작)
-        
-        print(f"🔄 카메라 전환: {new_cam_id} ({self.current_cam_index+1}/{len(self.available_cameras)})")
-        
-    def init_single_camera(self, cam_index):
-        """단일 카메라 초기화"""
-        self.cap = cv2.VideoCapture(cam_index)
-        if not self.cap.isOpened():
-            raise ValueError(f"❌ Cannot open camera index {cam_index}")
+        self.serial_mgr.send_tracking_data(frame_id, roi, conf, mode, fps, status)
 
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.config.CAM_WIDTH)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.CAM_HEIGHT)
-
-        self.frame_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.frame_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        print(f"📹 Camera {cam_index}: {self.frame_w}x{self.frame_h}")
-
-    # ================= Kalman 래퍼 ==================
+    # ================= Kalman 필터 관련 ==================
     def _init_kalman(self, cx, cy):
-        """KalmanTracker 초기화 래퍼"""
+        """칼만 필터 초기화 (중심점 기준)"""
         self.kalman_tracker.init_kalman(cx, cy)
 
     def _reset_kalman(self):
-        """KalmanTracker 리셋 래퍼"""
+        """칼만 필터 리셋"""
         self.kalman_tracker.reset()
 
     def _predict_kalman_roi(self):
-        """칼만 예측 ROI 래퍼"""
+        """칼만 필터로 다음 ROI 예측"""
         success, roi = self.kalman_tracker.predict_roi(
             self.frame_w, self.frame_h, self.config.ROI_W, self.config.ROI_H
         )
@@ -122,133 +92,16 @@ class HybridTracker:
             self.kalman_tracker.use_for_tracking = True
         return success
 
-    # ============== 하드웨어 초기화 ==============
-    def init_hardware(self, cam_index=0):
-        """YOLO + 카메라 초기화 (시리얼은 생성자에서!)"""
-        # 🔥 사용 가능 카메라 감지
-        self.detect_available_cameras()
-        if not self.available_cameras:
-            raise ValueError("❌ 사용 가능한 카메라가 없습니다")
-        
-        # 🔥 YOLO 모델 안전 로드
-        try:
-            self.model = YOLO(self.config.MODEL_PATH, task='detect')
-            print("🚀 TensorRT YOLO loaded")
-        except Exception as e:
-            print(f"❌ YOLO model load failed: {e}")
-            self.model = None
-
-        # 첫 번째 카메라 초기화
-        self.current_cam_index = 0
-        self.init_single_camera(self.available_cameras[self.current_cam_index])
-
-    # 🔥 SerialManager 사용
-    def send_serial_data(self, frame_id, roi, conf, mode, fps, status):
-        """SerialManager 위임"""
-        if not self.serial_mgr.is_connected():
-            return
-        self.serial_mgr.send_tracking_data(frame_id, roi, conf, mode, fps, status)
-
-    # ============== UI / 마우스 ==============
-    def setup_window(self):
-        """윈도우 및 마우스 콜백 설정"""
-        win_name = "HybridTracker (Drone) - YOLO Redetect ON + CAM_SWITCH"
-        cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(win_name, 1280, 720)
-        cv2.setMouseCallback(win_name, self.mouse_callback, self.mouse_param)
-        return win_name
-
-    def mouse_callback(self, event, x, y, flags, param):
-        """마우스 이벤트 처리"""
-        if event == cv2.EVENT_LBUTTONDOWN:
-            frame = param["frame"]
-            boxes = param["boxes"]
-
-            clicked_on_object = self._handle_yolo_click(x, y, boxes, frame)
-            if not clicked_on_object:
-                self._handle_manual_roi(x, y, frame)
-
-        elif event == cv2.EVENT_MOUSEWHEEL:
-            self._handle_zoom(flags)
-
-    def _handle_yolo_click(self, x, y, boxes, frame):
-        """YOLO 박스 클릭 처리 - 🔥 BBOX 숨기고 재탐지는 계속"""
-        if boxes is None or len(boxes) == 0 or not self.yolo_enabled:
-            return False
-
-        for box in boxes:
-            try:
-                b_xyxy = box.xyxy[0].tolist()
-                if (b_xyxy[0] <= x <= b_xyxy[2] and 
-                    b_xyxy[1] <= y <= b_xyxy[3]):
-                    self._set_roi_from_box(b_xyxy, frame, shrink=0.1)
-                    print(f"[YOLO→TEMPLATE] ROI: {self.current_roi}")
-                    self.lost_frame_count = 0
-                    self.roi_tracking_active = True
-                    self.show_yolo_boxes = False  # 🔥 BBOX 완전 숨김
-                    self.mouse_param["boxes"] = None  # 클릭 후 초기화
-                    return True
-            except:
-                continue
-        return False
-
-    def _handle_manual_roi(self, x, y, frame):
-        """수동 ROI 설정"""
-        x1 = max(0, int(x - self.config.ROI_W / 2))
-        y1 = max(0, int(y - self.config.ROI_H / 2))
-        x2 = min(self.frame_w - 1, int(x + self.config.ROI_W / 2))
-        y2 = min(self.frame_h - 1, int(y + self.config.ROI_H / 2))
-
-        if x2 > x1 and y2 > y1:
-            self.current_roi = (x1, y1, x2, y2)
-            self.template = frame[y1:y2, x1:x2].copy()
-            self.tracking_mode = "TEMPLATE"
-            self.lost_frame_count = 0
-            self.kalman_only_count = 0
-            self.roi_tracking_active = True
-            self.show_yolo_boxes = False  # 🔥 수동 ROI도 BBOX 숨김
-            print(f"[MANUAL] ROI: {self.current_roi}")
-
-            cx = (x1 + x2) / 2
-            cy = (y1 + y2) / 2
-            self._init_kalman(cx, cy)
-
-    def _set_roi_from_box(self, xyxy, frame, shrink=0.1):
-        """박스에서 ROI 생성"""
-        x1, y1, x2, y2 = map(int, xyxy)
-        w, h = x2 - x1, y2 - y1
-        x1 = int(x1 + w * shrink)
-        x2 = int(x2 - w * shrink)
-        y1 = int(y1 + h * shrink)
-        y2 = int(y2 - h * shrink)
-
-        self.current_roi = (max(0, x1), max(0, y1),
-                            min(self.frame_w - 1, x2), min(self.frame_h - 1, y2))
-        self.template = frame[y1:y2, x1:x2].copy()
-        self.tracking_mode = "TEMPLATE"
-        self.kalman_only_count = 0
-        self.roi_tracking_active = True
-
-        cx = (self.current_roi[0] + self.current_roi[2]) / 2
-        cy = (self.current_roi[1] + self.current_roi[3]) / 2
-        self._init_kalman(cx, cy)
-
-    def _handle_zoom(self, flags):
-        """마우스 휠 줌"""
-        win_name = "HybridTracker (Drone) - YOLO Redetect ON + CAM_SWITCH"
-        rect = cv2.getWindowImageRect(win_name)
-        w, h = rect[2], rect[3]
-
-        if flags > 0:
-            new_w, new_h = min(1920, w + 100), min(1080, h + 100)
+    def _fallback_to_kalman(self):
+        """템플릿 실패시 칼만 필터 폴백"""
+        if self.kalman_tracker.initialized and self._predict_kalman_roi():
+            print(f"🔥 KALMAN_ONLY[{self.kalman_only_count}] activated")
         else:
-            new_w, new_h = max(640, w - 100), max(480, h - 100)
+            self.lost_frame_count += 1
 
-        cv2.resizeWindow(win_name, new_w, new_h)
-
-    # ============== 템플릿 매칭 ==============
+    # ================= 템플릿 매칭 ==================
     def template_matching(self, frame):
-        """템플릿 매칭 추적 + 칼만 보완"""
+        """템플릿 매칭 + 칼만 보정"""
         if self.template is None or self.current_roi is None:
             return False, 0.0
 
@@ -317,65 +170,60 @@ class HybridTracker:
             self._fallback_to_kalman()
         return False, 0.0
 
-    def _fallback_to_kalman(self):
-        """템플릿 실패시 칼만 추적으로 폴백"""
-        if self.kalman_tracker.initialized and self._predict_kalman_roi():
-            print(f"🔥 KALMAN_ONLY[{self.kalman_only_count}] activated")
-        else:
-            self.lost_frame_count += 1
-
     def _log_template(self, frame_count, max_val, roi, new_pos, drift):
-        """템플릿 로그 출력"""
+        """템플릿 매칭 결과 로그 출력"""
         print(f"F{frame_count:4d} | TMP:{max_val:.3f} | "
               f"ROI{roi}→NEW{new_pos} | DRIFT:{drift:.1f}px")
 
-    # ============== YOLO ==============
+    # ================= YOLO 관련 ==================
+    def _set_roi_from_box(self, xyxy, frame, shrink=0.1):
+        """YOLO 박스에서 ROI 및 템플릿 생성"""
+        x1, y1, x2, y2 = map(int, xyxy)
+        w, h = x2 - x1, y2 - y1
+        x1 = int(x1 + w * shrink)
+        x2 = int(x2 - w * shrink)
+        y1 = int(y1 + h * shrink)
+        y2 = int(y2 - h * shrink)
+
+        self.current_roi = (max(0, x1), max(0, y1),
+                            min(self.frame_w - 1, x2), min(self.frame_h - 1, y2))
+        self.template = frame[y1:y2, x1:x2].copy()
+        self.tracking_mode = "TEMPLATE"
+        self.kalman_only_count = 0
+        self.roi_tracking_active = True
+
+        cx = (self.current_roi[0] + self.current_roi[2]) / 2
+        cy = (self.current_roi[1] + self.current_roi[3]) / 2
+        self._init_kalman(cx, cy)
+
     def yolo_detection(self, frame):
-        """YOLO 객체 탐지 - 🔥 재탐지는 계속, BBOX는 show_yolo_boxes에 따라"""
-        self.mouse_param["boxes"] = None  # 항상 초기화
+        """YOLO 객체 탐지 + 박스 그리기 + 재탐지"""
+        self.ui_mgr.mouse_param["boxes"] = None
 
         if not self.yolo_enabled or self.model is None:
             return
 
-        # 🔥 재탐지는 항상 실행
         try:
             results = self.model.predict(
                 source=frame, device=0, verbose=False,
-                conf=self.config.YOLO_CONF, imgsz=self.config.YOLO_IMGSZ, max_det=self.config.YOLO_MAX_DET
+                conf=self.config.YOLO_CONF, imgsz=self.config.YOLO_IMGSZ, 
+                max_det=self.config.YOLO_MAX_DET
             )
 
-            boxes = None
             for r in results:
                 boxes = r.boxes
                 if boxes is not None and len(boxes) > 0:
-                    self.mouse_param["boxes"] = boxes
-                    
-                    # 🔥 BBOX 그리기 제어 (클릭 후 숨김)
-                    if self.show_yolo_boxes:
-                        self._draw_yolo_boxes(r, frame)
-                    
+                    self.ui_mgr.mouse_param["boxes"] = boxes
+                    self.ui_mgr.draw_yolo_boxes(r, frame)
                     break
-                self.mouse_param["boxes"] = boxes
 
             self._yolo_redetect(boxes, frame)
 
         except Exception as e:
             print(f"YOLO error: {e}")
 
-    def _draw_yolo_boxes(self, result, frame):
-        """YOLO 박스 그리기 - show_yolo_boxes=True일 때만"""
-        for box in result.boxes:
-            try:
-                xyxy = box.xyxy[0].tolist()
-                cv2.rectangle(frame,
-                              (int(xyxy[0]), int(xyxy[1])),
-                              (int(xyxy[2]), int(xyxy[3])),
-                              (128, 128, 128), 1)
-            except:
-                continue
-
     def _yolo_redetect(self, boxes, frame):
-        """ROI 내 YOLO 재탐지 - 🔥 항상 동작"""
+        """주기적 ROI 내 YOLO 재탐지"""
         if (self.frame_count % self.config.REDETECT_INTERVAL != 0 or
                 self.current_roi is None):
             return
@@ -395,7 +243,7 @@ class HybridTracker:
             self.kalman_only_count = 0
 
     def _find_best_roi_box(self, boxes, roi_cx, roi_cy, rx1, rx2, ry1, ry2):
-        """ROI 내 최적 박스 찾기"""
+        """ROI 내 최적 YOLO 박스 선택 (신뢰도 + 거리 기준)"""
         best_box = None
         best_score = -1
         best_conf = 0
@@ -423,65 +271,20 @@ class HybridTracker:
 
         return best_box, best_score, best_conf
 
-    # ============== 그리기 / 상태 ==============
-    def draw_roi(self, frame):
-        """ROI 시각화 + Kalman 위치 점찍기"""
-        if self.current_roi is not None:
-            x1, y1, x2, y2 = map(int, self.current_roi)
-            
-            if self.tracking_mode == "TEMPLATE":
-                color = (0, 255, 255)
-            elif self.tracking_mode == "KALMAN_ONLY":
-                color = (255, 0, 255)
-            else:
-                color = (0, 128, 255)
-
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
-            cv2.putText(frame, self.tracking_mode, (x1, y1 - 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-
-            # 🔥 KalmanTracker 위치 표시
-            kx, ky = self.kalman_tracker.get_position()
-            if kx is not None:
-                kf_color = (0, 0, 255) if self.kalman_tracker.use_for_tracking else (0, 255, 0)
-                cv2.circle(frame, (kx, ky), 5 if self.kalman_tracker.use_for_tracking else 3, kf_color, -1)
-                cv2.putText(frame, "KF" + ("*" if self.kalman_tracker.use_for_tracking else ""), 
-                           (kx + 8, ky), cv2.FONT_HERSHEY_SIMPLEX, 0.5, kf_color, 1)
-
-    def draw_status(self, frame, fps):
-        """상태 표시 - 🔥 카메라 정보 추가"""
-        cam_info = f"CAM{self.available_cameras[self.current_cam_index]}"
-        bbox_status = "BBOX:OFF" if not self.show_yolo_boxes else "BBOX:ON "
-        status = (f"M:{self.tracking_mode[:4]} Y:{'ON' if self.yolo_enabled else 'OFF'} "
-                 f"{bbox_status}L:{self.lost_frame_count} K:{self.kalman_only_count} "
-                 f"T:{'ON' if self.roi_tracking_active else 'OFF'}")
-        cv2.putText(frame, status, (10, self.frame_h - 90),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        cv2.putText(frame, f"{cam_info} ({len(self.available_cameras)}cams)", (10, self.frame_h - 75),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-        cv2.putText(frame, "t:YOLO b:BBOX n:NEXT_CAM r:reset q:quit Wheel:ZOOM TX:ON", 
-                   (10, self.frame_h - 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(frame, f"FPS:{fps:.1f} CONF:{self.last_conf:.2f}", (10, self.frame_h - 25),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-    # ============== 메인 처리 ==============
+    # ================= 핵심 프레임 처리 ==================
     def process_frame(self, frame):
-        """단일 프레임 처리"""
+        """
+        단일 프레임 처리 (추적 로직만)
+        - 템플릿/칼만 우선 처리
+        - 실패시 YOLO 재탐지
+        - 직렬 전송
+        """
         self.frame_count += 1
-        self.mouse_param["frame"] = frame
+        self.ui_mgr.mouse_param["frame"] = frame
+        self.frame_w, self.frame_h = self.camera_mgr.frame_w, self.camera_mgr.frame_h
 
-        total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        if total_frames > 0:
-            progress = self.frame_count / total_frames * 100
-            cv2.putText(frame, f"F:{self.frame_count}/{total_frames} ({progress:.1f}%)",
-                        (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-        else:
-            cv2.putText(frame, f"F:{self.frame_count}",
-                        (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-
-        fps_est = 0.0
         tracking_success = False
+        fps_est = 0.0
 
         if (self.current_roi is not None and self.tracking_mode in ["TEMPLATE", "KALMAN_ONLY"] 
             and self.template is not None):
@@ -491,7 +294,7 @@ class HybridTracker:
                 self.last_conf = conf
                 tracking_success = success
                 fps_est = 30.0
-            else:
+            else:  # KALMAN_ONLY
                 tracking_success = True
                 self.last_conf = 0.75
                 fps_est = 60.0
@@ -504,8 +307,7 @@ class HybridTracker:
                 print("💥 KALMAN_TIMEOUT → YOLO REDETECT")
                 self.template = None
 
-        self.yolo_detection(frame)  # 🔥 항상 YOLO 재탐지 실행
-        self.draw_roi(frame)
+        self.yolo_detection(frame)
 
         if self.frame_count % self.config.TX_INTERVAL == 0:
             status = 'LOST' if self.lost_frame_count > 10 else 'OK'
@@ -520,82 +322,57 @@ class HybridTracker:
 
         return frame
 
-    def handle_keys(self, key, win_name):
-        """키 입력 처리 - 🔥 'n'키로 카메라 전환 추가"""
-        if key == ord('q'):
-            return False
-        elif key == ord('r'):
-            self.reset_tracking()
-            self.show_yolo_boxes = True  # 🔥 리셋시 BBOX 복원
-            print("🔄 Reset - BBOX 복원")
-        elif key == ord('t'):
-            self.yolo_enabled = not self.yolo_enabled
-            print(f"YOLO {'ON' if self.yolo_enabled else 'OFF'}")
-        elif key == ord('b'):  # 🔥 BBOX 토글
-            self.show_yolo_boxes = not self.show_yolo_boxes
-            print(f"BBOX {'ON' if self.show_yolo_boxes else 'OFF'}")
-        elif key == ord('n'):  # 🔥 카메라 전환
-            self.switch_camera()
-        return True
-
     def reset_tracking(self):
-        """추적 리셋 - 🔥 BBOX 상태 복원"""
+        """전체 추적 상태 리셋"""
         self.current_roi = None
         self.template = None
         self.tracking_mode = "NONE"
         self.lost_frame_count = 0
         self.kalman_only_count = 0
         self.roi_tracking_active = False
-        self.show_yolo_boxes = True  # 🔥 리셋시 BBOX 복원
+        self.show_yolo_boxes = True
         self._reset_kalman()
 
-    # 🔥 변경된 cleanup
     def cleanup(self):
-        """SerialManager 정리 추가"""
-        if self.cap:
-            self.cap.release()
+        """리소스 정리 (카메라/직렬/UI)"""
+        if hasattr(self, 'camera_mgr'):
+            self.camera_mgr.cleanup()
         self.serial_mgr.close()
-        cv2.destroyAllWindows()
+        if hasattr(self, 'ui_mgr'):
+            self.ui_mgr.cleanup()
         print("👋 Tracker ended")
 
-    def run(self, cam_index=0):
-        """메인 루프 (USB 카메라용 - 자동 감지)"""
-        self.init_hardware(cam_index)
-        win_name = self.setup_window()
+    def run(self):
+        """메인 루프: 하드웨어 초기화 → 프레임 처리 → UI 표시"""
+        self.init_hardware()
+        win_name = self.ui_mgr.setup_window()
 
-        print(f"🎬 Camera stream | t=YOLO b=BBOX n=NEXT_CAM r=RESET q=QUIT")
-        print(f"🔥 현재 카메라: {self.available_cameras[self.current_cam_index]}")
+        print(f"🎬 CameraManager stream | t=YOLO b=BBOX n:NEXT_CAM r=RESET q=QUIT")
+        print(f"🔥 현재 카메라: {self.camera_mgr.current_camera.index}")
+        print(f"🔥 사용 가능 카메라: {[c.index for c in self.camera_mgr.cameras]}")
         print(f"🔥 YOLO REDETECT:ON | BBOX:클릭후OFF | 'n'로 카메라전환 | 📡 Serial TX:ON")
 
-        prev_time = time.time()
+        self.ui_mgr.prev_time = cv2.getTickCount()
         while True:
-            if self.cap is None or not self.cap.isOpened():
-                print("💥 카메라 연결 오류 - 재시작")
-                break
-
-            ret, frame = self.cap.read()
+            ret, frame = self.camera_mgr.read_frame()
             if not ret:
-                print("💥 Camera read failed")
+                print("💥 카메라 읽기 실패")
                 time.sleep(0.1)
                 continue
 
             frame = self.process_frame(frame)
+            
+            frame, fps = self.ui_mgr.prepare_display_frame(frame)
+            self.ui_mgr.show_frame(frame)
 
-            curr_time = time.time()
-            fps = 1 / (curr_time - prev_time) if self.frame_count > 1 else 0
-            prev_time = curr_time
-            self.draw_status(frame, fps)
-
-            cv2.imshow(win_name, frame)
             key = cv2.waitKey(1) & 0xFF
-
-            if not self.handle_keys(key, win_name):
+            if not self.ui_mgr.handle_keys(key):
                 break
 
         self.cleanup()
 
 if __name__ == "__main__":
     tracker = HybridTracker()
-    tracker.run(cam_index=0)
+    tracker.run()
 
 
