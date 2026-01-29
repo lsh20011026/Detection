@@ -3,7 +3,7 @@ import time
 import struct
 
 class SerialManager:
-    """드론 추적기용 시리얼 통신 매니저"""
+    """드론 추적기용 시리얼 통신 매니저 (Jetson THS1)"""
     
     def __init__(self, port='/dev/ttyTHS1', baudrate=115200):
         self.port = port
@@ -12,7 +12,7 @@ class SerialManager:
         self.connect()
     
     def connect(self):
-        """시리얼 포트 연결"""
+        """Jetson UART 포트 연결 (timeout=1초)"""
         try:
             self.ser = serial.Serial(self.port, self.baudrate, timeout=1)
             print(f"✅ Serial connected: {self.port}")
@@ -23,7 +23,7 @@ class SerialManager:
             return False
     
     def send_tracking_data(self, frame_id, roi, conf, mode, fps, status):
-        """추적 데이터 전송"""
+        """추적 데이터 바이너리 패킷 전송 (AA55 헤더)"""
         if self.ser is None or not self.ser.is_open:
             return False
         
@@ -49,12 +49,13 @@ class SerialManager:
             return False
     
     def close(self):
+        """시리얼 포트 안전 종료"""
         if self.ser and self.ser.is_open:
             self.ser.close()
             print("🔌 Serial disconnected")
     
     def is_connected(self):
+        """연결 상태 확인"""
         return self.ser is not None and self.ser.is_open
-
 
 
