@@ -10,7 +10,7 @@ class KalmanTracker:
         self.use_for_tracking = False
         
     def init_kalman(self, cx, cy):
-        """ROI 중심 기준 칼만 필터 초기화"""
+        """ROI 중심으로 칼만 필터 초기화 (상태: 위치, 속도)"""
         self.kalman = cv2.KalmanFilter(4, 2)
         
         self.kalman.transitionMatrix = np.array([
@@ -34,13 +34,13 @@ class KalmanTracker:
         self.use_for_tracking = False
     
     def reset(self):
-        """칼만 필터 리셋"""
+        """칼만 필터 완전 리셋"""
         self.kalman = None
         self.initialized = False
         self.use_for_tracking = False
     
     def predict_roi(self, frame_w, frame_h, roi_w=60, roi_h=60):
-        """칼만 예측으로 ROI 업데이트"""
+        """칼만 예측 → 프레임 경계 내 ROI 좌표 계산"""
         if not self.initialized:
             return False, None
             
@@ -56,17 +56,15 @@ class KalmanTracker:
         return (x2 > x1 and y2 > y1), roi
     
     def correct(self, meas_x, meas_y):
-        """측정값으로 칼만 보정"""
+        """새 측정값으로 칼만 상태 보정"""
         if self.initialized:
             measurement = np.array([[np.float32(meas_x)], [np.float32(meas_y)]])
             self.kalman.correct(measurement)
     
     def get_position(self):
-        """현재 칼만 위치 반환"""
+        """현재 칼만 예측 위치 반환"""
         if self.initialized and self.kalman is not None:
             return int(self.kalman.statePost[0, 0]), int(self.kalman.statePost[1, 0])
         return None, None
-
-
 
 
