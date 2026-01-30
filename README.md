@@ -108,6 +108,8 @@ JETSON MAX 모드 (FPS 상승을 위해 필요)
 
 **파일 별 변경점**
 
+**TYPE A**
+
 **송신 (Jetson Orin nano Developer kit)**
 - test.py : yolo11n.pt를 이용하여 객체 탐지
 - test1.py : 프레임별 로그 추가
@@ -129,3 +131,17 @@ JETSON MAX 모드 (FPS 상승을 위해 필요)
 **수신 (PC)**
 - rec.py : 시리얼 통신을 통해 데이터를 받는 코드 (test4~test11)
 - rec2.py : 시리얼 통신 보완 (test12~test15)
+
+
+**TYPE B**
+- kcf1.py : Yolo11n.engine을 통해 객체탐지, KCF Tracker를 기반으로 추적
+- kcf2.py : 칼만 필터를 적용하여 객체의 움직임을 예측하여 ROI 추적을 보완
+- kcf3.py : 객체의 BBOX가 아닌 부분을 클릭해도 ROI 생성 후 추적
+
+- csrt1.py : Yolo11n.engine을 통해 객체탐지, CSRT Tracker를 기반으로 추적
+- csrt2.py : USB 카메라를 통해 찍히는 화면에 적용
+- csrt3.py : 객체의 BBOX 주변의 ROI 패딩 시각화
+- csrt4.py : 객체의 BBOX를 클릭하여 생긴 ROI의 사이즈를 동적으로 변동시킴
+- csrt5.py : ROI 내부에만 CSRT 트래커를 적용하여 프레임 상승시킴
+- csrt6.py : 최적화 및 디스플레이 상의 복잡성을 해결하기 위해 패딩 시각화 제거
+- csrt7.py : 파라미터 전달 중 발생하는 오류를 해결
