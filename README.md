@@ -134,10 +134,6 @@ JETSON MAX 모드 (FPS 상승을 위해 필요)
 
 
 **TYPE B**
-- kcf1.py : Yolo11n.engine을 통해 객체탐지, KCF Tracker를 기반으로 추적
-- kcf2.py : 칼만 필터를 적용하여 객체의 움직임을 예측하여 ROI 추적을 보완
-- kcf3.py : 객체의 BBOX가 아닌 부분을 클릭해도 ROI 생성 후 추적
-
 - csrt1.py : Yolo11n.engine을 통해 객체탐지, CSRT Tracker를 기반으로 추적
 - csrt2.py : USB 카메라를 통해 찍히는 화면에 적용
 - csrt3.py : 객체의 BBOX 주변의 ROI 패딩 시각화
@@ -145,3 +141,20 @@ JETSON MAX 모드 (FPS 상승을 위해 필요)
 - csrt5.py : ROI 내부에만 CSRT 트래커를 적용하여 프레임 상승시킴
 - csrt6.py : 최적화 및 디스플레이 상의 복잡성을 해결하기 위해 패딩 시각화 제거
 - csrt7.py : 파라미터 전달 중 발생하는 오류를 해결
+
+- kcf1.py : Yolo11n.engine을 통해 객체탐지, KCF Tracker를 기반으로 추적
+
+- bytetrack1.py : 바이트 트랙 적용
+- bytetrack2.py : 바이트 트랙 모드 전환 구현
+
+- dual1.py : KCF + ByteTrack 적용 (모드 전환으로 트래커 전환)
+- dual2.py : ROI 크기 문제 해결 (CLAMP 문제 해결)
+- dual3.py : KCF 문제 해결
+- dual4.py : 적응형 ROI 적용 (ByteTrack 한정)
+- dual5.py : init 및 팅김 버그 픽스
+- dual6.py : KCF + ByteTrack를 한 화면에 동시에 활용
+- dual7.py : ROI 2 위치 및 크기에 맞춰 ROI 1 위치 및 크기 변경 적용
+- dual8.py : 주/야간 카메라 전환
+
+- DualTrack1 : dual8.py 모듈화
+- DualTrack2 : ROI 1의 위치 및 크기 변경 시 불필요한 YOLO 사용 제거
