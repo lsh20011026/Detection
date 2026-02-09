@@ -129,8 +129,8 @@ JETSON MAX 모드 (FPS 상승을 위해 필요)
 - test15.py : USB 카메라로 실시간 화면에 적용 가능
 
 **MODULATION**
-- HybridTracker1
-- HybrridTracker2
+- HybridTracker1 : test15.py 모듈화
+- HybridTracker2 : 주/야간 카메라 전환 기능 추가
 
 **수신 (PC)**
 - rec.py : 시리얼 통신을 통해 데이터를 받는 코드 (test4~test11)
@@ -173,4 +173,4 @@ JETSON MAX 모드 (FPS 상승을 위해 필요)
 - DualTrack2 : ROI 1의 위치 및 크기 변경 시 불필요한 YOLO 사용 제거
 
 **수신 (PC)**
-- rec2.py : TYPE A와 같은 코드
+- rec2.py : TYPE A의 rec2.py 같은 코드
