@@ -128,9 +128,14 @@ JETSON MAX 모드 (FPS 상승을 위해 필요)
 - test14.py : BBOX를 클릭할 경우 BBOX들은 모두 OFF되고, ROI만 표시됨
 - test15.py : USB 카메라로 실시간 화면에 적용 가능
 
+**MODULATION**
+- HybridTracker1
+- HybrridTracker2
+
 **수신 (PC)**
 - rec.py : 시리얼 통신을 통해 데이터를 받는 코드 (test4~test11)
 - rec2.py : 시리얼 통신 보완
+
 
 
 **TYPE B**
