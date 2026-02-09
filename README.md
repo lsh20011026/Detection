@@ -136,6 +136,8 @@ JETSON MAX 모드 (FPS 상승을 위해 필요)
 **TYPE B**
 
 **송신 (Jetson Orin nano Developer kit)**
+
+**CSRT**
 - csrt1.py : Yolo11n.engine을 통해 객체탐지, CSRT Tracker를 기반으로 추적
 - csrt2.py : USB 카메라를 통해 찍히는 화면에 적용
 - csrt3.py : 객체의 BBOX 주변의 ROI 패딩 시각화
@@ -144,11 +146,14 @@ JETSON MAX 모드 (FPS 상승을 위해 필요)
 - csrt6.py : 최적화 및 디스플레이 상의 복잡성을 해결하기 위해 패딩 시각화 제거
 - csrt7.py : 파라미터 전달 중 발생하는 오류를 해결
 
+**KCF**
 - kcf1.py : Yolo11n.engine을 통해 객체탐지, KCF Tracker를 기반으로 추적
 
+**BYTETRACK**
 - bytetrack1.py : 바이트 트랙 적용
 - bytetrack2.py : 바이트 트랙 모드 전환 구현
 
+**DUALTRACKER (KCF + BYTETRACK)**
 - dual1.py : KCF + ByteTrack 적용 (모드 전환으로 트래커 전환)
 - dual2.py : ROI 크기 문제 해결 (CLAMP 문제 해결)
 - dual3.py : KCF 문제 해결
@@ -158,6 +163,7 @@ JETSON MAX 모드 (FPS 상승을 위해 필요)
 - dual7.py : ROI 2 위치 및 크기에 맞춰 ROI 1 위치 및 크기 변경 적용
 - dual8.py : 주/야간 카메라 전환
 
+**MODULATION**
 - DualTrack1 : dual8.py 모듈화
 - DualTrack2 : ROI 1의 위치 및 크기 변경 시 불필요한 YOLO 사용 제거
 
