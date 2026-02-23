@@ -50,40 +50,59 @@ Jetson 리커버리 모드
 - sudo apt update
 
 파이썬 설치
-- sudo apt install python3.10
-- 버전 확인
-- python3.10 --version
+- ppa를 다룰 유틸리티 설치 : sudo apt install software-properties-common
+- 이전 파이썬 버전 설치를 위한 세팅 : sudo add-apt-repository ppa:deadsnakes/ppa
+- 패키지 최신화 : sudo apt update
+- 파이썬 설치 : sudo apt install python3.10
+- 버전 확인 : python3.10 --version
+
+
 
 
 
 **2. 각 라이브러리 버전**
 
-- torch : 2.8.0
-- torchvision : 0.23.0
-- numpy : 1.26.4
-- ultralytics : 8.3.221
+- Ultralytics: 8.4.11
+- OpenCV: 4.5.4
+- NumPy:  1.23.5
+- PyTorch: 2.9.1
+- CUDA:   12.6
+- GPU:    True
+
+- 버전 확인
+python -c "import ultralytics, cv2, numpy as np, torch; \
+print(f'Ultralytics: {ultralytics.__version__}'); \
+print(f'OpenCV:      {cv2.__version__}'); \
+print(f'NumPy:       {np.__version__}'); \
+print(f'PyTorch:     {torch.__version__}'); \
+print(f'CUDA:        {torch.version.cuda}'); \
+print(f'GPU:         {torch.cuda.is_available()}')"
 
 
 
 **3. 설치 과정**
 
-- ultralytics 인스톨
-- pip3 install ultralytics
-- numpy 인스톨
-- pip3 install "numpy<2" --user
-- opencv 인스톨
-- pip3 install "opencv-python<4.12" --user
-- torchvision-0.23.0-cp310-linux_aarch64.whl, torch-2.8.0-cp310-cp310-linux_aarch64.whl 다운로드 (pypi.jetson-ai-lab.io/jp6/cu126)
-- cd Downloads/
-- pip3 install [파일명]
-- yolo11n.pt 모델 다운 
-- python 실행
-- from ultralytics import YOLO
-- model = YOLO('yolo11n.pt') 작성 후 실행
+sudo apt install python3-pip									                                                  #pip3 설치
+torchvision-0.24.1-cp310-linux_aarch64.whl, torch-2.9.1-cp310-cp310-linux_aarch64.whl 다운로드
+(pypi.jetson-ai-lab.io/jp6/cu126)
+cd Downloads/
+pip3 install torchvision-0.24.1-cp310-cp310-linux_aarch64.whl			                              #torchvision 설치
+pip3 install torch-2.9.1-cp310-cp310-linux_aarch64.whl				                                  #torch 설치
+pip install opencv-contrib-python 								                                              # KCF 트래커 설치
+pip3 install "numpy==1.23.5" --user							                                                # numpy 설치
+sudo apt install python3-opencv libopencv-dev libgtk-3-dev pkg-config 	                        # opencv 설치
+pip3 install ultralytics==8.4.11								                                                # ultralytics 설치
+
+
+**3-1. yolo11n.pt 모델 다운 **
+python 실행
+from ultralytics import YOLO
+model = YOLO('yolo11n.pt') 작성 후 실행
 
 
 
-**3-1. .pt -> .onnx -> engine 변환 과정, JETSON MAX 모드**
+
+**3-2. .pt -> .onnx -> engine 변환 과정, JETSON MAX 모드**
 
 엔진 생성
 - from ultralytics import YOLO
@@ -92,6 +111,29 @@ Jetson 리커버리 모드
 
 JETSON MAX 모드 (FPS 상승을 위해 필요)
 - sudo nvpmodel -m 0 && sudo jetson_clocks
+
+
+**3-3. libcudss.so 파일 누락 문제 해결**
+wget https://developer.download.nvidia.com/compute/cudss/0.7.1/local_installers/cudss-local-tegra-repo-ubuntu2404-0.7.1_0.7.1-1_arm64.deb
+sudo dpkg -i cudss-local-tegra-repo-ubuntu2404-0.7.1_0.7.1-1_arm64.deb
+sudo cp /var/cudss-local-tegra-repo-ubuntu2404-0.7.1/cudss-*-keyring.gpg /usr/share/keyrings/
+sudo apt-get update
+sudo apt-get -y install cudss
+
+**3-4 Mousecallback 문제 발생 시**
+
+pip 버전 제거
+pip uninstall opencv-python -y
+pip3 uninstall -y opencv* || true
+pip3 cache purge
+rm -rf ~/.local/lib/python3.10/site-packages/cv2* ~/.local/lib/python3.10/site-packages/opencv*
+
+패키지 업데이트
+sudo apt update
+
+apt 버전으로 재설치
+sudo apt install python3-opencv libopencv-dev libgtk-3-dev pkg-config
+
 
 
 
