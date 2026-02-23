@@ -171,6 +171,9 @@ JETSON MAX 모드 (FPS 상승을 위해 필요)
 **MODULATION**
 - DualTrack1 : dual8.py 모듈화
 - DualTrack2 : ROI 1의 위치 및 크기 변경 시 불필요한 YOLO 사용 제거
+- DualTrack3 : ROI 1 내부에서 객체의 종류에 따라 우선순위 부여
+- DualTrack4 : 방향키를 통해 미세 조정이 가능한 Nudge 기능 추가
+
 
 **수신 (PC)**
 - rec2.py : TYPE A의 rec2.py 같은 코드
